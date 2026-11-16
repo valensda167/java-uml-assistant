@@ -67,3 +67,15 @@ cd java-uml-assistant
 La verificación compila los tres ejemplos, comprueba dos resultados del sueldo
 y valida el UML de herencia de Instructor. Ollama solo se necesita para
 `AsistenteLocal.ps1`.
+
+## Del enunciado a Java y Mermaid
+
+```powershell
+.\AsistenteLocal.ps1 -Texto 'Crea una clase Rectangulo con base, altura y un metodo calcularArea.'
+```
+
+También puedes usar `-Enunciado .\ejercicio.txt`. El modo resolver guarda el
+enunciado, la respuesta original y los archivos Java en una carpeta nueva bajo
+`soluciones/`. Genera `UML.md` a partir del Java si la compilación pasa.
+La compilación verifica la estructura del código. Revisa que la solución cumpla
+el ejercicio y prueba los resultados antes de entregarla.

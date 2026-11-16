@@ -1,12 +1,14 @@
+[CmdletBinding(DefaultParameterSetName='Archivo')]
 param(
-    [Parameter(Mandatory)][ValidateSet('resolver','revisar','practicar')][string]$Modo,
-    [Parameter(Mandatory)][string]$Enunciado,
+    [ValidateSet('resolver','revisar','practicar')][string]$Modo = 'resolver',
+    [Parameter(Mandatory,ParameterSetName='Archivo')][string]$Enunciado,
+    [Parameter(Mandatory,ParameterSetName='Directo')][string]$Texto,
     [string[]]$Codigo = @(),
-    [string]$Modelo = 'qwen2.5-coder:0.5b'
+    [string]$Modelo = 'qwen2.5-coder:0.5b',
+    [string]$Salida = (Join-Path $PSScriptRoot 'soluciones')
 )
-
 $ErrorActionPreference = 'Stop'
-$problema = Get-Content -LiteralPath $Enunciado -Raw -Encoding UTF8
+$problema = if ($PSCmdlet.ParameterSetName -eq 'Directo') { $Texto } else { Get-Content -LiteralPath $Enunciado -Raw -Encoding UTF8 }
 $palabras = @([regex]::Matches($problema.ToLowerInvariant(), '[\p{L}]{4,}') |
     ForEach-Object Value | Sort-Object -Unique)
 $referencia = Get-ChildItem (Join-Path $PSScriptRoot 'ejemplos/netbeans') -Directory -ErrorAction SilentlyContinue |
@@ -19,7 +21,7 @@ $referencia = Get-ChildItem (Join-Path $PSScriptRoot 'ejemplos/netbeans') -Direc
 
 if ($Modo -eq 'revisar' -and !$Codigo.Count) { throw 'Indica los archivos con -Codigo.' }
 $accion = switch ($Modo) {
-    resolver { 'Entrega Java completo, con un bloque por archivo.' }
+    resolver { 'Entrega cada archivo Java completo dentro de su propio bloque Markdown con etiqueta java. Incluye una clase publica por archivo.' }
     revisar { 'Indica requisitos cumplidos y faltantes. Cita clases y metodos.' }
     practicar { 'Da una pista breve y haz una pregunta. Reserva la solucion.' }
 }
@@ -50,8 +52,36 @@ try {
 }
 if ([string]::IsNullOrWhiteSpace($respuesta.message.content)) { throw 'Ollama devolvio una respuesta vacia.' }
 if ($respuesta.done_reason -eq 'length') { Write-Warning 'La respuesta alcanzo el limite de longitud.' }
-$respuesta.message.content
+if ($Modo -ne 'resolver') {
+    $respuesta.message.content
+    return
+}
 
+$destino = Join-Path $Salida ([guid]::NewGuid().ToString('N').Substring(0,12))
+$null = New-Item -ItemType Directory -Path $destino -Force
+$respuesta.message.content | Set-Content -LiteralPath (Join-Path $destino 'Respuesta.md') -Encoding UTF8
+$problema | Set-Content -LiteralPath (Join-Path $destino 'Enunciado.txt') -Encoding UTF8
+if ($respuesta.done_reason -eq 'length') { throw "Respuesta incompleta. Revisa $destino o prueba con otro modelo." }
 
-
+$bloques = [regex]::Matches($respuesta.message.content, '(?ims)^[ \t]*```java[ \t]*\r?\n(?<java>.*?)^[ \t]*```[ \t]*\r?$')
+if (!$bloques.Count) { throw "No se encontraron bloques Java completos. Revisa $destino." }
+$archivos = @(foreach ($bloque in $bloques) {
+    $java = $bloque.Groups['java'].Value
+    $tipo = [regex]::Match($java, '(?m)^\s*public\s+(?:(?:abstract|final|sealed|non-sealed)\s+)*(?:class|interface|record|enum)\s+([\p{L}_$][\p{L}\p{N}_$]*)')
+    if (!$tipo.Success) { throw "Falta un tipo publico en un bloque Java. Revisa $destino." }
+    $archivo = Join-Path $destino ($tipo.Groups[1].Value + '.java')
+    if (Test-Path -LiteralPath $archivo) { throw "Nombre Java duplicado: $archivo" }
+    $ruta = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($archivo)
+    [IO.File]::WriteAllText($ruta, $java, [Text.UTF8Encoding]::new($false))
+    $ruta
+})
+$build = New-Item -ItemType Directory -Path (Join-Path $destino 'build')
+& javac -proc:none -encoding UTF-8 -d $build.FullName @archivos
+if ($LASTEXITCODE -ne 0) { throw "El Java generado no compila. Los archivos quedaron en $destino." }
+$uml = & java (Join-Path $PSScriptRoot 'JavaUml.java') @archivos
+if ($LASTEXITCODE -ne 0 -or $uml -notcontains 'classDiagram') { throw "No se pudo generar el UML. Revisa $destino." }
+$uml | Set-Content -LiteralPath (Join-Path $destino 'UML.md') -Encoding UTF8
+Write-Host "Java compilado y UML generado en $destino"
+$archivos
+$uml
 
