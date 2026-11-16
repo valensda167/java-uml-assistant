@@ -1,0 +1,1 @@
+Modela alumno, curso y matricula. Usa el codigo como referencia de relaciones y encapsulamiento.

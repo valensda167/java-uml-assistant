@@ -1,0 +1,1 @@
+Modela un empleado con nombre, sueldo base y horas extras. Paga S/ 20 por cada hora extra. Calcula y muestra el sueldo total. Crea una clase de prueba.
