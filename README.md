@@ -89,3 +89,12 @@ el ejercicio y prueba los resultados antes de entregarla.
 Compila la solución y ejecuta cuatro pruebas de índices, con duplicados,
 negativos y valores extremos. Al terminar, muestra el diagrama Mermaid.
 La demo funciona con el JDK y usa código incluido en el repositorio.
+
+## Aplicación de escritorio
+
+Abre `Abrir-Java-UML.cmd` en Windows. Pega el enunciado y elige **Generar Java y UML**, **Revisar Java** o **Pedir una pista**. Los ejercicios generados quedan en `soluciones/`. La app usa Ollama local, las reglas de estilo, una síntesis de teoría y ejemplos seleccionados. Estas referencias se incluyen en la consulta. El modelo conserva sus pesos originales.
+
+## Referencias de diseño
+
+- [MagicUML](https://github.com/xukmin/magicuml) inspira la generación de diagramas desde declaraciones Java. El conversor de este proyecto usa el árbol sintáctico de javac y produce Mermaid.
+- [JADX](https://github.com/skylot/jadx) sirve como referencia para distinguir la decompilación de Android del análisis de código fuente Java. El flujo de ejercicios trabaja con los archivos fuente generados localmente.

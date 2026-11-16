@@ -4,8 +4,9 @@ param(
     [Parameter(Mandatory,ParameterSetName='Archivo')][string]$Enunciado,
     [Parameter(Mandatory,ParameterSetName='Directo')][string]$Texto,
     [string[]]$Codigo = @(),
-    [string]$Modelo = 'qwen2.5-coder:0.5b',
-    [string]$Salida
+    [string]$Modelo,
+    [string]$Salida,
+    [switch]$SinTest
 )
 $ErrorActionPreference = 'Stop'
 $problema = if ($PSCmdlet.ParameterSetName -eq 'Directo') { $Texto } else { Get-Content -LiteralPath $Enunciado -Raw -Encoding UTF8 }
@@ -21,11 +22,13 @@ $referencia = Get-ChildItem (Join-Path $PSScriptRoot 'ejemplos/netbeans') -Direc
 
 if ($Modo -eq 'revisar' -and !$Codigo.Count) { throw 'Indica los archivos con -Codigo.' }
 $accion = switch ($Modo) {
-    resolver { 'Entrega cada archivo Java completo dentro de su propio bloque Markdown con etiqueta java. Incluye una clase publica por archivo.' }
+    resolver { 'Genera Java 17 que compile con javac. Usa solo el JDK: sin JUnit, anotaciones de prueba ni bibliotecas externas. Incluye todas las clases propias e imports. Devuelve solo bloques Markdown java, uno por archivo, con una clase publica del mismo nombre. Omite package salvo que el enunciado pida uno expresamente.' }
     revisar { 'Indica requisitos cumplidos y faltantes. Cita clases y metodos.' }
     practicar { 'Da una pista breve y haz una pregunta. Reserva la solucion.' }
 }
-$consulta = "$accion Estilo: Java 17, POO sencilla, nombres en espanol, atributos privados cuando corresponda, modelo separado de Test con main, calculo separado de mostrarDatos(). El enunciado tiene prioridad sobre el estilo y los ejemplos. Si solicita solo una clase, omite main, comentarios y metodos adicionales.`nEjercicio:`n$problema"
+$consulta = "$accion Estilo: Java 17, POO sencilla, nombres en espanol, atributos privados cuando corresponda, modelo separado de Test con main, calculo separado de mostrarDatos(). El enunciado tiene prioridad sobre el estilo y los ejemplos. Evita comentarios y metodos adicionales. En modo resolver, sigue el formato de archivos indicado al final.`nEjercicio:`n$problema"
+$teoria = Get-Content (Join-Path $PSScriptRoot 'Teoria.txt') -Raw -Encoding UTF8
+$consulta += "`nPrincipios de Java y UML:`n$teoria"
 foreach ($archivo in $Codigo) {
     $consulta += "`nArchivo: $archivo`n" + (Get-Content -LiteralPath $archivo -Raw -Encoding UTF8)
 }
@@ -55,56 +58,119 @@ try {
     }
     if (!$modelos) { throw 'Ollama no inicio en 127.0.0.1:11434. Abre Ollama y vuelve a intentar.' }
 }
+if (!$Modelo) {
+    $Modelo = if ('qwen2.5-coder:1.5b' -in $modelos.models.name) { 'qwen2.5-coder:1.5b' } else { 'qwen2.5-coder:0.5b' }
+}
 if ($Modelo -notin $modelos.models.name) { throw "Falta el modelo: ejecuta ollama pull $Modelo" }
 
-$limite = if ($Modo -eq 'practicar') { 120 } else { 900 }
-$cuerpo = @{
-    model = $Modelo
-    stream = $false
-    options = @{ num_ctx = 8192; num_predict = $limite }
-    messages = @(@{ role='system'; content=$accion }, @{ role='user'; content=$consulta })
-} | ConvertTo-Json -Depth 6
-try {
-    $respuesta = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/chat' -Method Post -TimeoutSec 120 `
-        -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($cuerpo))
-} catch {
-    throw "Fallo Ollama local: $($_.Exception.Message)"
+$limite = if ($Modo -eq 'practicar') { 120 } else { 3200 }
+if ($Modo -eq 'resolver' -and !$SinTest) {
+    $consulta += "`nFormato obligatorio: entrega Modelo.java y TestModelo.java (reemplaza Modelo por el nombre real). El modelo contiene atributos, constructores y metodos. TestModelo es una clase Java normal: public static void main(String[] args) crea el objeto con new Modelo(...) y llama sus metodos. No uses JUnit. Si agregas clases de apoyo, entrega cada una en un bloque java separado."
 }
-if ([string]::IsNullOrWhiteSpace($respuesta.message.content)) { throw 'Ollama devolvio una respuesta vacia.' }
-if ($respuesta.done_reason -eq 'length') { Write-Warning 'La respuesta alcanzo el limite de longitud.' }
-if ($Modo -ne 'resolver') {
-    $respuesta.message.content
-    return
+for ($intentoGeneracion = 1; $intentoGeneracion -le 2; $intentoGeneracion++) {
+    try {
+        $cuerpo = @{
+            model = $Modelo
+            stream = $false
+            options = @{ num_ctx = 8192; num_predict = $limite; temperature = 0.15 }
+            messages = @(@{ role='system'; content=$accion }, @{ role='user'; content=$consulta })
+        } | ConvertTo-Json -Depth 6
+        try {
+            $respuesta = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/chat' -Method Post -TimeoutSec 240 `
+                -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($cuerpo))
+        } catch {
+            throw "Fallo Ollama local: $($_.Exception.Message)"
+        }
+        if ([string]::IsNullOrWhiteSpace($respuesta.message.content)) { throw 'Ollama devolvio una respuesta vacia.' }
+        if ($respuesta.done_reason -eq 'length') { Write-Warning 'La respuesta alcanzo el limite de longitud.' }
+        if ($Modo -ne 'resolver') {
+            $respuesta.message.content
+            return
+        }
+
+        if (!$Salida) { $Salida = Join-Path $PSScriptRoot 'soluciones' }
+        $destino = Join-Path $Salida ([guid]::NewGuid().ToString('N').Substring(0,12))
+        $null = New-Item -ItemType Directory -Path $destino -Force
+        $respuesta.message.content | Set-Content -LiteralPath (Join-Path $destino 'Respuesta.md') -Encoding UTF8
+        $problema | Set-Content -LiteralPath (Join-Path $destino 'Enunciado.txt') -Encoding UTF8
+        if ($respuesta.done_reason -eq 'length') { throw "Respuesta incompleta. Revisa $destino o prueba con otro modelo." }
+
+        $bloques = [regex]::Matches($respuesta.message.content, '(?ims)^[ \t]*```java[ \t]*\r?\n(?<java>.*?)^[ \t]*```[ \t]*\r?$')
+        if (!$bloques.Count) { throw "No se encontraron bloques Java completos. Revisa $destino." }
+        $entradaJava = New-Item -ItemType Directory -Path (Join-Path $destino 'respuesta-java')
+        $bloquesJava = @(for ($i = 0; $i -lt $bloques.Count; $i++) {
+            $ruta = Join-Path $entradaJava.FullName "Bloque$i.java"
+            [IO.File]::WriteAllText($ruta, $bloques[$i].Groups['java'].Value, [Text.UTF8Encoding]::new($false))
+            $ruta
+        })
+        $rutaDestino = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($destino)
+        & java (Join-Path $PSScriptRoot 'JavaUml.java') --split $rutaDestino @bloquesJava
+        if ($LASTEXITCODE -ne 0) { throw "No se pudieron separar las clases Java. Revisa $destino." }
+        $archivos = @(Get-ChildItem -LiteralPath $rutaDestino -File -Filter '*.java' | ForEach-Object FullName)
+        $build = New-Item -ItemType Directory -Path (Join-Path $destino 'build')
+        $preferencia = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $diagnostico = @(& javac -proc:none -encoding UTF-8 -d $build.FullName @archivos 2>&1)
+            $codigoSalida = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $preferencia
+        }
+        if ($codigoSalida -ne 0) {
+            $detalle = ($diagnostico | ForEach-Object { $_.ToString() }) -join "`r`n"
+            $detalle | Set-Content -LiteralPath (Join-Path $destino 'Compilacion.txt') -Encoding UTF8
+            throw "El Java generado no compila.`r`nCarpeta: $destino`r`n`r`n$detalle"
+        }
+        $uml = & java (Join-Path $PSScriptRoot 'JavaUml.java') @archivos
+        if ($LASTEXITCODE -ne 0 -or $uml -notcontains 'classDiagram') {
+            throw "No se pudo generar el UML. Revisa $destino."
+        }
+        if (!$SinTest -and !($uml -cmatch '^    Test(.+) \.\.> \1 : crea$')) {
+            throw "Falta la pareja Modelo.java y TestModelo.java con main y new Modelo(). Carpeta: $destino"
+        }
+
+        break
+    } catch {
+        if ($Modo -ne 'resolver' -or $intentoGeneracion -eq 2 -or $_.Exception.Message -like 'Fallo Ollama local:*') { throw }
+        $causa = $_.Exception.Message
+        if ($destino) {
+            $rutaIntento = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($destino)
+            $causa = $causa.Replace($rutaIntento, '[carpeta]').Replace($destino, '[carpeta]')
+        }
+        $consulta += "`nCorrige la respuesta anterior. Devuelve TODOS los archivos, incluso los que no cambien. Los nombres de carpetas del diagnostico no son paquetes Java.`nDiagnostico:`n$causa`nRespuesta anterior:`n$($respuesta.message.content)"
+        Write-Warning 'La primera solucion no paso la comprobacion. Reintentando una vez.'
+    }
 }
-
-if (!$Salida) { $Salida = Join-Path $PSScriptRoot 'soluciones' }
-$destino = Join-Path $Salida ([guid]::NewGuid().ToString('N').Substring(0,12))
-$null = New-Item -ItemType Directory -Path $destino -Force
-$respuesta.message.content | Set-Content -LiteralPath (Join-Path $destino 'Respuesta.md') -Encoding UTF8
-$problema | Set-Content -LiteralPath (Join-Path $destino 'Enunciado.txt') -Encoding UTF8
-if ($respuesta.done_reason -eq 'length') { throw "Respuesta incompleta. Revisa $destino o prueba con otro modelo." }
-
-$bloques = [regex]::Matches($respuesta.message.content, '(?ims)^[ \t]*```java[ \t]*\r?\n(?<java>.*?)^[ \t]*```[ \t]*\r?$')
-if (!$bloques.Count) { throw "No se encontraron bloques Java completos. Revisa $destino." }
-$archivos = @(foreach ($bloque in $bloques) {
-    $java = $bloque.Groups['java'].Value
-    $tipo = [regex]::Match($java, '(?m)^\s*public\s+(?:(?:abstract|final|sealed|non-sealed)\s+)*(?:class|interface|record|enum)\s+([\p{L}_$][\p{L}\p{N}_$]*)')
-    if (!$tipo.Success) { throw "Falta un tipo publico en un bloque Java. Revisa $destino." }
-    $archivo = Join-Path $destino ($tipo.Groups[1].Value + '.java')
-    if (Test-Path -LiteralPath $archivo) { throw "Nombre Java duplicado: $archivo" }
-    $ruta = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($archivo)
-    [IO.File]::WriteAllText($ruta, $java, [Text.UTF8Encoding]::new($false))
-    $ruta
-})
-$build = New-Item -ItemType Directory -Path (Join-Path $destino 'build')
-& javac -proc:none -encoding UTF-8 -d $build.FullName @archivos
-if ($LASTEXITCODE -ne 0) { throw "El Java generado no compila. Los archivos quedaron en $destino." }
-$uml = & java (Join-Path $PSScriptRoot 'JavaUml.java') @archivos
-if ($LASTEXITCODE -ne 0 -or $uml -notcontains 'classDiagram') { throw "No se pudo generar el UML. Revisa $destino." }
 $uml | Set-Content -LiteralPath (Join-Path $destino 'UML.md') -Encoding UTF8
-Write-Host "Java compilado y UML generado en $destino"
-$archivos
+$mermaid = Join-Path $PSScriptRoot 'vendor/mermaid.min.js'
+if (Test-Path -LiteralPath $mermaid) {
+    $src = ([uri](Get-Item -LiteralPath $mermaid).FullName).AbsoluteUri
+    $diagrama = [Net.WebUtility]::HtmlEncode(($uml | Select-Object -Skip 1 -Last ($uml.Count - 2)) -join "`n")
+    @"
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><title>Diagrama de clases</title>
+<style>body{margin:36px;background:#f4f6fb;color:#242742;font:16px system-ui}pre{background:white;padding:24px;overflow:auto;border-radius:12px}</style>
+<h1>Diagrama de clases</h1>
+<pre class="mermaid">$diagrama</pre>
+<script src="$src"></script>
+<script>if(window.mermaid){mermaid.initialize({startOnLoad:true,securityLevel:'strict'});}</script>
+</html>
+"@ | Set-Content -LiteralPath (Join-Path $destino 'UML.html') -Encoding UTF8
+}
+"Java compilado y UML generado en $destino"
+foreach ($archivo in $archivos) {
+    [IO.Path]::GetFileName($archivo)
+    Get-Content -LiteralPath $archivo -Raw -Encoding UTF8
+}
 $uml
+
+
+
+
+
+
+
+
 
 
 

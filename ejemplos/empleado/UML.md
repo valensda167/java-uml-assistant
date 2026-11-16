@@ -12,4 +12,5 @@ classDiagram
     class TestEmpleado {
         +main(String[] args) void
     }
+    TestEmpleado ..> Empleado : crea
 ```
