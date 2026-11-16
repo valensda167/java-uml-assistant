@@ -79,3 +79,13 @@ enunciado, la respuesta original y los archivos Java en una carpeta nueva bajo
 `soluciones/`. Genera `UML.md` a partir del Java si la compilación pasa.
 La compilación verifica la estructura del código. Revisa que la solución cumpla
 el ejercicio y prueba los resultados antes de entregarla.
+
+## Demo de Two Sum
+
+```powershell
+.\EjecutarDosSuma.ps1
+```
+
+Compila la solución y ejecuta cuatro pruebas de índices, con duplicados,
+negativos y valores extremos. Al terminar, muestra el diagrama Mermaid.
+La demo funciona con el JDK y usa código incluido en el repositorio.
