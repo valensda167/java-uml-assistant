@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory,ParameterSetName='Directo')][string]$Texto,
     [string[]]$Codigo = @(),
     [string]$Modelo = 'qwen2.5-coder:0.5b',
-    [string]$Salida = (Join-Path $PSScriptRoot 'soluciones')
+    [string]$Salida
 )
 $ErrorActionPreference = 'Stop'
 $problema = if ($PSCmdlet.ParameterSetName -eq 'Directo') { $Texto } else { Get-Content -LiteralPath $Enunciado -Raw -Encoding UTF8 }
@@ -37,6 +37,26 @@ if ($referencia.Puntos -gt 0 -and $Modo -ne 'practicar') {
     }
     $consulta += "`nReferencia adicional de NetBeans:`n" + ($archivos -join "`n")
 }
+try {
+    $modelos = Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 -ErrorAction Stop
+} catch {
+    $ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+    $rutaOllama = if ($ollama) { $ollama.Source } else {
+        Join-Path $env:LOCALAPPDATA 'Programs/Ollama/ollama.exe'
+    }
+    if (!(Test-Path -LiteralPath $rutaOllama -PathType Leaf)) { throw 'Instala Ollama para usar el asistente local.' }
+    Write-Host 'Iniciando Ollama local...'
+    Start-Process -FilePath $rutaOllama -ArgumentList 'serve' -WindowStyle Hidden
+    for ($intento = 0; $intento -lt 10 -and !$modelos; $intento++) {
+        Start-Sleep -Milliseconds 500
+        try {
+            $modelos = Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 -ErrorAction Stop
+        } catch {}
+    }
+    if (!$modelos) { throw 'Ollama no inicio en 127.0.0.1:11434. Abre Ollama y vuelve a intentar.' }
+}
+if ($Modelo -notin $modelos.models.name) { throw "Falta el modelo: ejecuta ollama pull $Modelo" }
+
 $limite = if ($Modo -eq 'practicar') { 120 } else { 900 }
 $cuerpo = @{
     model = $Modelo
@@ -57,6 +77,7 @@ if ($Modo -ne 'resolver') {
     return
 }
 
+if (!$Salida) { $Salida = Join-Path $PSScriptRoot 'soluciones' }
 $destino = Join-Path $Salida ([guid]::NewGuid().ToString('N').Substring(0,12))
 $null = New-Item -ItemType Directory -Path $destino -Force
 $respuesta.message.content | Set-Content -LiteralPath (Join-Path $destino 'Respuesta.md') -Encoding UTF8
@@ -84,4 +105,6 @@ $uml | Set-Content -LiteralPath (Join-Path $destino 'UML.md') -Encoding UTF8
 Write-Host "Java compilado y UML generado en $destino"
 $archivos
 $uml
+
+
 
