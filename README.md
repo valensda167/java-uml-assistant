@@ -53,3 +53,17 @@ La carpeta local `ejemplos/netbeans` admite una subcarpeta por proyecto con sus 
 ## Verificación reproducible
 
 Ejecuta `./VerificarEjemplo.ps1` desde PowerShell. Compila el ejemplo incluido, comprueba el resultado de un empleado con diez horas extras y regenera el diagrama Mermaid si la prueba pasa.
+
+## Inicio rápido en Windows
+
+Desde PowerShell con JDK 17 o posterior:
+
+```powershell
+git clone https://github.com/valensda167/java-uml-assistant.git
+cd java-uml-assistant
+.\VerificarEjemplo.ps1
+```
+
+La verificación compila los tres ejemplos, comprueba dos resultados del sueldo
+y valida el UML de herencia de Instructor. Ollama solo se necesita para
+`AsistenteLocal.ps1`.
