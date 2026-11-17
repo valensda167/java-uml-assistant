@@ -1,0 +1,23 @@
+{
+  "clases": [{
+    "nombre": "CuentaBancaria",
+    "atributos": [
+      {"nombre":"titular","tipo":"String","visibilidad":"private"},
+      {"nombre":"saldo","tipo":"double","visibilidad":"private"}
+    ],
+    "constructores": [["String","double"]],
+    "metodos": [
+      {"nombre":"depositar","params":["double"],"retorno":"void","visibilidad":"public"},
+      {"nombre":"retirar","params":["double"],"retorno":"boolean","visibilidad":"public"},
+      {"nombre":"getSaldo","params":[],"retorno":"double","visibilidad":"public"},
+      {"nombre":"mostrarDatos","params":[],"retorno":"void","visibilidad":"public"}
+    ]
+  }],
+  "pares_test":["TestCuentaBancaria"],
+  "casos":[
+    {"nombre":"deposito positivo","codigo":"CuentaBancaria c = new CuentaBancaria(\"Ana\", 100); c.depositar(50);","afirmaciones":["c.getSaldo() == 150"]},
+    {"nombre":"saldo insuficiente","codigo":"CuentaBancaria c = new CuentaBancaria(\"Ana\", 100); boolean r = c.retirar(200);","afirmaciones":["!r","c.getSaldo() == 100"]},
+    {"nombre":"monto cero","codigo":"CuentaBancaria c = new CuentaBancaria(\"Ana\", 100); boolean r = c.retirar(0);","afirmaciones":["!r","c.getSaldo() == 100"]},
+    {"nombre":"deposito negativo","codigo":"CuentaBancaria c = new CuentaBancaria(\"Ana\", 100); c.depositar(-50);","afirmaciones":["c.getSaldo() == 100"]}
+  ]
+}

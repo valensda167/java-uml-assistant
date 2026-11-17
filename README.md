@@ -1,100 +1,92 @@
-# Java UML Assistant
+﻿# Java UML Assistant
 
-Herramientas para practicar POO en Java con la guía de estilo de este repositorio. Requiere JDK 17 o posterior. Los modos de IA preparan una consulta para pegar en Codex. El conversor Java a Mermaid funciona localmente.
+Aplicacion de escritorio para convertir un enunciado en Java y UML Mermaid siguiendo `estilo.txt` y ejemplos personales. Funciona en Windows con **JDK 17+**, Windows PowerShell 5.1 o PowerShell 7 y **Ollama**. El modelo preferido es `qwen2.5-coder:1.5b`; si falta utiliza `qwen2.5-coder:0.5b` cuando esta instalado.
 
-## Probar el ejemplo
+## Abrir y resolver
+
+1. Abre `Abrir-Java-UML.cmd` o el acceso directo existente.
+2. Pega el enunciado completo, incluidos nombres y condiciones.
+3. Opcionalmente carga un contrato JSON con **Cargar requisitos**. Hay uno en `ejemplos/cuenta/requisitos.json`. Revisa sus casos antes de usarlos.
+4. Pulsa **Generar Java y UML**. El estado indica generacion, compilacion, reparacion y verificacion.
+5. En **Java** selecciona el archivo del objeto o su `TestObjeto`; en **UML Mermaid** copia el diagrama. **Ver diagrama** abre la representacion grafica local.
+6. **Ejecutar Test** compila y ejecuta los programas `Test*.java` en otra ventana. Cada ejecucion tiene un limite de 15 segundos y no admite entrada interactiva con Scanner.
+
+**Copiar pestana**, **Guardar pestana** y **Abrir soluciones** permiten reutilizar los resultados. La pestana **Registro** muestra errores y la carpeta con todos los intentos. La ventana espera a que termine la consulta para cerrarse; cada llamada a Ollama tiene un limite de 240 segundos.
+
+El lanzador aplica `ExecutionPolicy Bypass` solo al proceso que abre esta aplicacion; no cambia la politica de Windows de forma permanente.
+
+## Que se comprueba
+
+- Java compilable, separado en archivos por clase.
+- Pareja `Objeto.java` y `TestObjeto.java` con `main(String[])` publico y estatico que crea el objeto. `-SinTest` permite ejercicios cuya organizacion sea distinta.
+- Con un contrato: clases, atributos, visibilidad, firmas, constructores, herencia, interfaces y los casos Java que proporciona el usuario.
+- Sin contrato: se indica explicitamente que **el cumplimiento del enunciado esta pendiente**.
+
+Compilar no demuestra que el ejercicio este resuelto. Un contrato tampoco demuestra comportamientos no incluidos en sus casos. El modelo no genera automaticamente expectativas que luego presente como verdad. El contrato puede editarse en la pestana **Requisitos**; el ejemplo de CuentaBancaria explica su formato. Para clases dentro de un paquete agrega `"paquete":"nombre.del.paquete"` al contrato.
+
+Los casos y programas generados se ejecutan en tu equipo con tu usuario. El limite de tiempo y memoria no es un aislamiento de seguridad. Revisa codigo y contratos de fuentes desconocidas antes de ejecutarlos. No se envian datos a servicios externos en la configuracion local predeterminada.
+
+## Consola PowerShell
+
+Desde la carpeta del proyecto:
 
 ```powershell
-javac -d build ejemplos/empleado/Empleado.java ejemplos/empleado/TestEmpleado.java
-java -cp build TestEmpleado
-java JavaUml.java ejemplos/empleado/Empleado.java ejemplos/empleado/TestEmpleado.java |
-    Set-Content ejemplos/empleado/UML.md -Encoding UTF8
+.\AsistenteLocal.ps1 -Texto 'Crea Rectangulo con base, altura, calcularArea y TestRectangulo.'
+.\AsistenteLocal.ps1 -Enunciado ejemplos/cuenta/enunciado.txt -Requisitos ejemplos/cuenta/requisitos.json
+.\AsistenteLocal.ps1 -Modo practicar -Texto 'Como separo el modelo y el main?'
+.\AsistenteLocal.ps1 -Modo revisar -Texto 'Revisa este ejercicio' -Codigo .\Objeto.java
+.\EjecutarSolucion.ps1 -Carpeta .\soluciones\ID
 ```
 
-Consulta el [diagrama del ejemplo](ejemplos/empleado/UML.md). El conversor lee clases de nivel superior, atributos, constructores, métodos, herencia e interfaces declaradas. Las asociaciones y multiplicidades quedan para una siguiente versión.
+`-Modelo` selecciona un modelo instalado. `-SinFormatoJson` admite proveedores o modelos que no soporten el esquema JSON; el parser tambien reconoce bloques Markdown Java. `-UrlOllama` permite un servidor alternativo o uno simulado para pruebas. Cambiar esta direccion puede enviar enunciado, guia y ejemplos al servidor indicado.
 
-## Resolver, revisar y practicar
+## Arquitectura
 
-Desde la carpeta principal, genera una consulta y pégala en Codex usando el comando `asistente` de WezTerm.
+- `Aplicacion.ps1`: ventana y trabajo en segundo plano.
+- `Flujo.ps1`: devuelve un objeto y guarda `resultado.json`, sin depender de la ventana.
+- `AsistenteLocal.ps1`: entrada de consola compatible con `-Texto` y `-Enunciado`.
+- `Verificar.ps1`: compara la estructura con el contrato y ejecuta casos acotados.
+- `Procesos.ps1`: captura salidas de Java/javac y limita tiempos.
+- `JavaUml.java`: parser con el AST de javac; separacion, inspeccion JSON y UML.
+- `PrepararConsulta.ps1`: preparacion manual de consultas para otros asistentes; no integra ni paga una API.
+
+Para reducir el consumo de memoria se utiliza una ventana de contexto de 4096 tokens y se pide a Ollama descargar el modelo de memoria tras cada respuesta. Esto puede aumentar el tiempo de inicio de la siguiente consulta, pero deja memoria disponible para Java y la ventana. El conversor UML se compila una vez por version de su fuente y se reutiliza desde build/.
+
+El flujo pide JSON `{archivos:[{nombre,contenido}]}`, conserva la respuesta original, separa clases, compila con `-proc:none`, genera UML y verifica. Conserva cada intento en su propia carpeta. Repara hasta tres veces como maximo y se detiene si se repite el diagnostico. Para errores de compilacion con archivo identificable solicita solo los archivos afectados y conserva los demas; para errores estructurales o de requisitos solicita una solucion completa. Se registra el intento con mas comprobaciones aprobadas. Respuestas vacias, truncadas y problemas de conexion tienen diagnosticos propios.
+
+La guia se incluye de forma acotada para reservar contexto al enunciado y la respuesta. Se adjunta teoria y hasta dos ejemplos pertinentes de `ejemplos/netbeans`; si no hay coincidencias se utiliza Empleado. Esto **no entrena ni modifica los pesos** del modelo. Un modelo de 1.5B puede fallar con problemas largos; no hay promesa de resolver cualquier ejercicio.
+
+## UML
+
+Cada solucion correcta incluye:
+
+- `UML.md`: clases y dependencias de pruebas.
+- `UML-modelo.md`: excluye clases con prefijo Test.
+- `UML-resumen.md`: modelo sin miembros.
+- `UML-pruebas.md`: cajas y dependencias de creacion desde los Test.
+- `UML.html` y `mermaid.min.js`: visualizacion sin conexion.
+
+Incluye herencia, interfaces, visibilidad, marcadores abstract/interface/enumeration y static/abstract. Detecta asociaciones directas, arreglos, colecciones, valores de Map y Optional. Usa `0..*` para colecciones y `0..1` para Optional; **no infiere composicion ni obligatoriedad del dominio**. Incluye hash SHA-256 de las fuentes. Java escribe UTF-8 directamente para conservar nombres con tildes.
 
 ```powershell
-.\PrepararConsulta.ps1 -Modo resolver -Enunciado ejemplos/empleado/enunciado.txt
-.\PrepararConsulta.ps1 -Modo revisar -Enunciado ejemplos/empleado/enunciado.txt -Codigo ejemplos/empleado/Empleado.java
-.\PrepararConsulta.ps1 -Modo practicar -Enunciado ejemplos/empleado/enunciado.txt
+java JavaUml.java --modelo --salida UML.md Objeto.java TestObjeto.java
+java JavaUml.java --inspeccionar --salida Estructura.json Objeto.java TestObjeto.java
 ```
 
-Si PowerShell restringe la ejecución de scripts, abre el repositorio en Codex y pídele que use `estilo.txt` y el ejemplo de `ejemplos/empleado` como referencia para el modo elegido.
+Limitaciones: analisis de tipos de nivel superior, reconocimiento de relaciones por nombres simples y comprobacion exacta de firmas en los contratos. No es un analizador semantico completo. La deduccion automatica de imports cubre tipos habituales del JDK; otros errores se devuelven al modelo.
 
-## Cómo funciona
-
-`estilo.txt` guarda la guía. `PrepararConsulta.ps1` combina esa guía, el enunciado, el ejemplo elegido y la instrucción del modo. En modo revisar también incluye los archivos que indiques con `-Codigo`. Pega el resultado en Codex para obtener código, una revisión o una pista.
-
-Elige la referencia con `-Referencia empleado`, `-Referencia alumno` o `-Referencia curso`. Por ejemplo:
+## Pruebas
 
 ```powershell
-.\PrepararConsulta.ps1 -Modo resolver -Enunciado ejercicio.txt -Referencia curso
-```
-
-Los ejemplos Alumno y TestCurso son copias de los proyectos de NetBeans. Sus enunciados son resúmenes del código existente. Alumno muestra encapsulamiento y matrícula. TestCurso muestra herencia de Persona a Instructor. El conversor genera Mermaid desde las declaraciones Java, de modo que puedes regenerar el diagrama después de editar el código.
-
-
-## IA local con Ollama
-
-Con Ollama abierto y el modelo descargado, ejecuta desde esta carpeta:
-
-```powershell
-.\AsistenteLocal.ps1 -Modo practicar -Enunciado ejemplos/empleado/enunciado.txt
-```
-
-También puedes usar `resolver` o `revisar`. Para revisar agrega `-Codigo ruta/Archivo.java`. Usa `-Modelo` para elegir otro modelo instalado. La consulta se envía a Ollama en 127.0.0.1 y la respuesta se muestra como texto. Revisa y compila cualquier código generado antes de usarlo.
-
-La carpeta local `ejemplos/netbeans` admite una subcarpeta por proyecto con sus archivos Java. El asistente elige una referencia adicional por coincidencias entre el enunciado y los nombres de clases. Puedes usar los ejemplos incluidos aunque esa carpeta no exista. Las copias privadas quedan fuera de Git.
-
-## Verificación reproducible
-
-Ejecuta `./VerificarEjemplo.ps1` desde PowerShell. Compila el ejemplo incluido, comprueba el resultado de un empleado con diez horas extras y regenera el diagrama Mermaid si la prueba pasa.
-
-## Inicio rápido en Windows
-
-Desde PowerShell con JDK 17 o posterior:
-
-```powershell
-git clone https://github.com/valensda167/java-uml-assistant.git
-cd java-uml-assistant
 .\VerificarEjemplo.ps1
-```
-
-La verificación compila los tres ejemplos, comprueba dos resultados del sueldo
-y valida el UML de herencia de Instructor. Ollama solo se necesita para
-`AsistenteLocal.ps1`.
-
-## Del enunciado a Java y Mermaid
-
-```powershell
-.\AsistenteLocal.ps1 -Texto 'Crea una clase Rectangulo con base, altura y un metodo calcularArea.'
-```
-
-También puedes usar `-Enunciado .\ejercicio.txt`. El modo resolver guarda el
-enunciado, la respuesta original y los archivos Java en una carpeta nueva bajo
-`soluciones/`. Genera `UML.md` a partir del Java si la compilación pasa.
-La compilación verifica la estructura del código. Revisa que la solución cumpla
-el ejercicio y prueba los resultados antes de entregarla.
-
-## Demo de Two Sum
-
-```powershell
 .\EjecutarDosSuma.ps1
+.\pruebas\VerificarFlujo.ps1
 ```
 
-Compila la solución y ejecuta cuatro pruebas de índices, con duplicados,
-negativos y valores extremos. Al terminar, muestra el diagrama Mermaid.
-La demo funciona con el JDK y usa código incluido en el repositorio.
+Las primeras comprueban Empleado (dos sueldos), Alumno, Curso con herencia y cuatro casos de Two Sum. La ultima usa un servidor Ollama simulado local: no descarga modelos ni requiere IA. Comprueba contrato correcto, bugs de logica y firmas, truncamiento, respuesta vacia, bloques con varias clases, imports, ausencia de Test, falta de contrato, conexion fallida, UML y tiempo limite. Conserva evidencia bajo `soluciones/pruebas-*`.
 
-## Aplicación de escritorio
+`soluciones/`, `build/`, `.class` y `ejemplos/netbeans/` quedan fuera de Git. No guardes claves de API en el repositorio publico.
 
-Abre `Abrir-Java-UML.cmd` en Windows. Pega el enunciado y elige **Generar Java y UML**, **Revisar Java** o **Pedir una pista**. Los ejercicios generados quedan en `soluciones/`. La app usa Ollama local, las reglas de estilo, una síntesis de teoría y ejemplos seleccionados. Estas referencias se incluyen en la consulta. El modelo conserva sus pesos originales.
+## Referencias
 
-## Referencias de diseño
-
-- [MagicUML](https://github.com/xukmin/magicuml) inspira la generación de diagramas desde declaraciones Java. El conversor de este proyecto usa el árbol sintáctico de javac y produce Mermaid.
-- [JADX](https://github.com/skylot/jadx) sirve como referencia para distinguir la decompilación de Android del análisis de código fuente Java. El flujo de ejercicios trabaja con los archivos fuente generados localmente.
+[MagicUML](https://github.com/xukmin/magicuml) inspira la conversion de declaraciones a diagramas. [JADX](https://github.com/skylot/jadx) es una referencia de decompilacion Android; no es una dependencia ni un entrenador. Este proyecto analiza fuentes Java con javac y utiliza Mermaid distribuido en `vendor/` con su licencia.
